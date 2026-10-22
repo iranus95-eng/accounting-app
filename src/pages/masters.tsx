@@ -20,7 +20,7 @@ export function ProductsPage() {
   return (
     <CrudPage<Product & Record<string, unknown>>
       table="products" title="สินค้า" orderBy="code"
-      defaults={() => ({ code: '', name: '', category_id: '', price: '', cost: '', active: true })}
+      defaults={() => ({ code: '', name: '', category_id: '', price: '', cost: '', commission_per_unit: '', active: true })}
       afterChange={reload}
       fields={[
         { key: 'code', label: 'รหัส' },
@@ -28,6 +28,7 @@ export function ProductsPage() {
         { key: 'category_id', label: 'หมวด', type: 'select', required: true, options: categories.map(c => ({ value: c.id, label: c.name })) },
         { key: 'price', label: 'ราคาขาย (ก่อน VAT)', type: 'number' },
         { key: 'cost', label: 'ต้นทุน', type: 'number', nullable: true },
+        { key: 'commission_per_unit', label: 'ค่าคอมตั้งต้น (บาท/หน่วย)', type: 'number', nullable: true, placeholder: 'ว่าง = กรอกเองทุกบิล' },
         { key: 'active', label: 'ใช้งาน', type: 'bool' },
       ]}
       columns={[
@@ -36,6 +37,7 @@ export function ProductsPage() {
         { label: 'หมวด', value: r => cat.get(r.category_id)?.name },
         { label: 'ราคาขาย', value: r => r.price, render: r => qty(r.price), num: true },
         { label: 'ต้นทุน', value: r => r.cost, render: r => (r.cost == null ? '' : qty(r.cost)), num: true },
+        { label: 'ค่าคอม/หน่วย', value: r => r.commission_per_unit, render: r => (r.commission_per_unit == null ? '' : qty(r.commission_per_unit)), num: true },
         { label: 'สถานะ', value: r => (r.active ? 'ใช้งาน' : 'เลิกขาย'), render: r => (r.active ? '' : <span className="pill mute">เลิกขาย</span>) },
       ]}
     />
@@ -124,18 +126,16 @@ export function SalespeoplePage() {
     <>
       <CrudPage<Salesperson & Record<string, unknown>>
         table="salespeople" title="พนักงานขาย / ผู้รับค่าคอม" orderBy="name" afterChange={reload}
-        defaults={() => ({ name: '', phone: '', commission_rate: '', is_employee: false, active: true })}
+        defaults={() => ({ name: '', phone: '', is_employee: false, active: true })}
         fields={[
           { key: 'name', label: 'ชื่อ', required: true, full: true },
           { key: 'phone', label: 'โทร' },
-          { key: 'commission_rate', label: 'ค่าคอม % ของยอดก่อน VAT', type: 'number' },
           { key: 'is_employee', label: 'เป็นพนักงานบริษัท', type: 'bool' },
           { key: 'active', label: 'ใช้งาน', type: 'bool' },
         ]}
         columns={[
           { label: 'ชื่อ', value: r => r.name },
           { label: 'โทร', value: r => r.phone },
-          { label: 'ค่าคอม %', value: r => r.commission_rate, num: true },
           { label: 'ประเภท', value: r => (r.is_employee ? 'พนักงาน' : 'ตัวแทนภายนอก') },
         ]}
         rowActions={r => <button className="btn sm" onClick={() => setHistory(r)}>ประวัติ</button>}

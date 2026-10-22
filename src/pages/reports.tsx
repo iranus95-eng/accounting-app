@@ -221,7 +221,7 @@ function CommissionReport({ data, month }: { data: MonthData; month: string }) {
     return { name: sp.name, bills: mine.length, sales: mine.reduce((s, x) => s + num(x.subtotal), 0), commission: mine.reduce((s, x) => s + num(x.commission), 0) };
   }).filter(r => r.bills > 0).sort((a, b) => b.sales - a.sales);
   return (
-    <Card title={`ค่าคอมมิชชั่น · ${thMonth(month)}`} sub="คิดจากยอดขายก่อน VAT ตามวันที่บิล ไม่หักภาษี ณ ที่จ่าย"
+    <Card title={`ค่าคอมมิชชั่น · ${thMonth(month)}`} sub="รวมค่าคอมที่กรอกในแต่ละรายการสินค้า ตามวันที่บิล ไม่หักภาษี ณ ที่จ่าย"
       actions={<button className="btn" onClick={() => downloadCsv(`ค่าคอม-${month}.csv`, ['ชื่อ', 'จำนวนบิล', 'ยอดขาย', 'ค่าคอม'], rows.map(r => [r.name, r.bills, r2(r.sales), r2(r.commission)]))}>ส่งออก Excel</button>}>
       {rows.length === 0 ? <Empty>ไม่มีค่าคอมเดือนนี้</Empty> : (
         <div className="tablewrap"><table>
