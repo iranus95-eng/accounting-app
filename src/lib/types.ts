@@ -24,6 +24,8 @@ export interface SaleSummary {
 }
 export interface SaleItem { id: string; sale_id: string; product_id: string | null; description: string; category_id: string; qty: number; unit_price: number }
 export interface Receipt { id: string; sale_id: string; receipt_date: string; amount: number; deduction: number; note: string | null }
+/** Internal customer rebate (เงินทอน): not on the bill, not part of VAT, owner-only. */
+export interface Rebate { id: string; sale_id: string; amount: number; paid_date: string | null; note: string | null }
 export interface Purchase {
   id: string; doc_no: string | null; doc_date: string; supplier_id: string; category_id: string | null; description: string | null;
   amount: number; has_vat: boolean; credit_days: number; due_date: string; paid_date: string | null;

@@ -7,17 +7,19 @@ import { AppCtx, type AppState, type Lookups } from './app-context';
 import { DashboardPage, ReportsPage } from './pages/reports';
 import { ReceivablesPage, SalesPage } from './pages/sales';
 import { PayrollPage } from './pages/payroll';
+import { RebatesPage } from './pages/rebates';
 import { SettingsPage } from './pages/settings';
 import {
   CategoriesPage, CustomersPage, EmployeesPage, ExpensesPage, PettyCashPage, ProductsPage, PurchasesPage, SalespeoplePage, SuppliersPage,
 } from './pages/masters';
 
-interface Page { key: string; label: string; group: string; staffOnly?: boolean; monthly?: boolean; render: () => ReactNode }
+interface Page { key: string; label: string; group: string; staffOnly?: boolean; ownerOnly?: boolean; monthly?: boolean; render: () => ReactNode }
 
 const PAGES: Page[] = [
   { key: 'dash', label: 'ภาพรวม', group: 'หลัก', staffOnly: true, monthly: true, render: () => <DashboardPage /> },
   { key: 'sales', label: 'บิลขาย', group: 'หลัก', monthly: true, render: () => <SalesPage /> },
   { key: 'ar', label: 'ลูกหนี้ / รับเงิน', group: 'หลัก', staffOnly: true, render: () => <ReceivablesPage /> },
+  { key: 'rebates', label: 'เงินทอนลูกค้า', group: 'หลัก', ownerOnly: true, monthly: true, render: () => <RebatesPage /> },
   { key: 'purchases', label: 'ซื้อสินค้า', group: 'บันทึก', staffOnly: true, monthly: true, render: () => <PurchasesPage /> },
   { key: 'expenses', label: 'ค่าใช้จ่าย', group: 'บันทึก', staffOnly: true, monthly: true, render: () => <ExpensesPage /> },
   { key: 'petty', label: 'เงินสดย่อย', group: 'บันทึก', staffOnly: true, monthly: true, render: () => <PettyCashPage /> },
@@ -161,7 +163,7 @@ function Workspace({ session }: { session: Session }) {
   if (!settings) return null;
 
   const isStaff = member.role !== 'sales';
-  const pages = PAGES.filter(p => isStaff || !p.staffOnly);
+  const pages = PAGES.filter(p => (isStaff || !p.staffOnly) && (member.role === 'owner' || !p.ownerOnly));
   const current = pages.find(p => p.key === page) ?? pages[0];
   const groups = [...new Set(pages.map(p => p.group))];
   const state: AppState = { ...lookups, member, settings, month, reload, toast, isStaff };
