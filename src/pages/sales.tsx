@@ -89,8 +89,14 @@ export function SalesPage() {
   );
 }
 
-interface Line { product_id: string; description: string; category_id: string; qty: string; unit_price: string }
-const blankLine = (): Line => ({ product_id: '', description: '', category_id: '', qty: '1', unit_price: '' });
+interface Line {
+  product_id: string; description: string; category_id: string; qty: string; unit_price: string;
+  /** commission in baht for the whole line */
+  commission: string;
+  /** commission follows qty × product default until the user types their own */
+  commissionAuto: boolean;
+}
+const blankLine = (): Line => ({ product_id: '', description: '', category_id: '', qty: '1', unit_price: '', commission: '', commissionAuto: true });
 
 function NewSale({ onClose, onSaved }: { onClose: () => void; onSaved: (id: string) => void }) {
   const { customers, salespeople, products, categories, settings, member, toast } = useApp();
@@ -118,8 +124,12 @@ function NewSale({ onClose, onSaved }: { onClose: () => void; onSaved: (id: stri
     if (c?.credit_days != null) setCredit(String(c.credit_days));
   }
 
+  const autoCommission = (l: Line) => {
+    const per = products.find(p => p.id === l.product_id)?.commission_per_unit;
+    return l.commissionAuto && per != null ? { ...l, commission: String(r2(num(l.qty) * num(per))) } : l;
+  };
   function setLine(i: number, patch: Partial<Line>) {
-    setLines(ls => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+    setLines(ls => ls.map((l, j) => (j === i ? autoCommission({ ...l, ...patch }) : l)));
   }
   function pickProduct(i: number, id: string) {
     const p = products.find(x => x.id === id);
@@ -128,7 +138,7 @@ function NewSale({ onClose, onSaved }: { onClose: () => void; onSaved: (id: stri
 
   const subtotal = r2(lines.reduce((s, l) => s + num(l.qty) * num(l.unit_price), 0));
   const vat = hasVat ? r2((subtotal * settings.vat_rate) / 100) : 0;
-  const rate = salespeople.find(s => s.id === salespersonId)?.commission_rate ?? 0;
+  const commission = r2(lines.reduce((s, l) => s + num(l.commission), 0));
 
   async function save() {
     setErr('');
@@ -137,6 +147,7 @@ function NewSale({ onClose, onSaved }: { onClose: () => void; onSaved: (id: stri
     const items = lines.filter(l => l.description.trim() && num(l.qty) > 0);
     if (!items.length) return setErr('กรุณาใส่รายการสินค้าอย่างน้อย 1 รายการ');
     if (items.some(l => !l.category_id)) return setErr('ทุกรายการต้องมีหมวดสินค้า');
+    if (commission > 0 && !salespersonId) return setErr('มีค่าคอม กรุณาเลือกพนักงานขายที่ได้ค่าคอม');
     setBusy(true);
     try {
       // Retry once if two people took the same running number at the same moment.
@@ -145,7 +156,7 @@ function NewSale({ onClose, onSaved }: { onClose: () => void; onSaved: (id: stri
         const docNo = must(await sb.rpc('next_sale_no', { d: docDate })) as string;
         const res = await sb.from('sales').insert({
           doc_no: docNo, doc_date: docDate, customer_id: customerId, salesperson_id: salespersonId || null,
-          commission_rate: rate, has_vat: hasVat, credit_days: Number(credit), note: note.trim() || null,
+          has_vat: hasVat, credit_days: Number(credit), note: note.trim() || null,
         }).select('id').single();
         if (res.error && res.error.code !== '23505') throw new Error(res.error.message);
         sale = res.data;
@@ -153,7 +164,7 @@ function NewSale({ onClose, onSaved }: { onClose: () => void; onSaved: (id: stri
       if (!sale) throw new Error('ออกเลขที่บิลไม่สำเร็จ ลองใหม่อีกครั้ง');
       must(await sb.from('sale_items').insert(items.map(l => ({
         sale_id: sale!.id, product_id: l.product_id || null, description: l.description.trim(), category_id: l.category_id,
-        qty: num(l.qty), unit_price: num(l.unit_price),
+        qty: num(l.qty), unit_price: num(l.unit_price), commission: r2(num(l.commission)),
       }))));
       if (num(rebate) > 0) must(await sb.from('rebates').insert({ sale_id: sale.id, amount: r2(num(rebate)) }));
       toast('บันทึกบิลแล้ว');
@@ -180,8 +191,8 @@ function NewSale({ onClose, onSaved }: { onClose: () => void; onSaved: (id: stri
         </Field>
         <Field label="พนักงานขาย">
           <select value={salespersonId} disabled={isSales} onChange={e => setSalespersonId(e.target.value)}>
-            <option value="">— ไม่มีค่าคอม —</option>
-            {salespeople.filter(s => s.active || s.id === salespersonId).map(s => <option key={s.id} value={s.id}>{s.name} ({s.commission_rate}%)</option>)}
+            <option value="">— ไม่มีพนักงานขาย —</option>
+            {salespeople.filter(s => s.active || s.id === salespersonId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </Field>
         <Field label="ภาษี">
@@ -200,7 +211,7 @@ function NewSale({ onClose, onSaved }: { onClose: () => void; onSaved: (id: stri
 
       <div className="tablewrap" style={{ marginTop: 14 }}>
         <table className="items">
-          <thead><tr><th>สินค้า</th><th>รายละเอียด</th><th>หมวด</th><th className="n">จำนวน</th><th className="n">ราคา/หน่วย</th><th className="n">รวม</th><th /></tr></thead>
+          <thead><tr><th>สินค้า</th><th>รายละเอียด</th><th>หมวด</th><th className="n">จำนวน</th><th className="n">ราคา/หน่วย</th><th className="n">รวม</th><th className="n">ค่าคอม (บาท)</th><th /></tr></thead>
           <tbody>
             {lines.map((l, i) => (
               <tr key={i}>
@@ -217,9 +228,10 @@ function NewSale({ onClose, onSaved }: { onClose: () => void; onSaved: (id: stri
                     {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </td>
-                <td style={{ width: 90 }}><input type="number" step="any" inputMode="decimal" value={l.qty} onChange={e => setLine(i, { qty: e.target.value })} /></td>
+                <td style={{ width: 120 }}><input type="number" step="any" inputMode="decimal" value={l.qty} onChange={e => setLine(i, { qty: e.target.value })} /></td>
                 <td style={{ width: 110 }}><input type="number" step="any" inputMode="decimal" value={l.unit_price} onChange={e => setLine(i, { unit_price: e.target.value })} /></td>
                 <td className="n">{money(num(l.qty) * num(l.unit_price))}</td>
+                <td style={{ width: 110 }}><input type="number" step="any" inputMode="decimal" value={l.commission} onChange={e => setLine(i, { commission: e.target.value, commissionAuto: false })} /></td>
                 <td>{lines.length > 1 && <button className="btn sm" onClick={() => setLines(ls => ls.filter((_, j) => j !== i))}>×</button>}</td>
               </tr>
             ))}
@@ -232,7 +244,7 @@ function NewSale({ onClose, onSaved }: { onClose: () => void; onSaved: (id: stri
         <span>รวมก่อน VAT</span><span>{money(subtotal)}</span>
         <span>VAT</span><span>{money(vat)}</span>
         <span className="t">รวมทั้งสิ้น</span><span className="t">{money(subtotal + vat)}</span>
-        {rate > 0 && <><span className="muted">ค่าคอม {rate}%</span><span className="muted">{money((subtotal * rate) / 100)}</span></>}
+        {commission > 0 && <><span className="muted">ค่าคอมรวม</span><span className="muted">{money(commission)}</span></>}
       </div>
       <div className="grid">
         <Field label="หมายเหตุ" full><textarea rows={2} value={note} onChange={e => setNote(e.target.value)} /></Field>
@@ -302,6 +314,13 @@ function SaleDetail({ id, onClose, onChanged }: { id: string; onClose: () => voi
     onChanged();
   }
 
+  async function updateCommission(itemId: string, commission: number) {
+    const res = await sb.from('sale_items').update({ commission: r2(commission) }).eq('id', itemId);
+    if (res.error) return toast(res.error.message);
+    await load();
+    onChanged();
+  }
+
   async function addRebate() {
     setErr('');
     if (num(rb.amount) <= 0) return setErr('กรุณากรอกจำนวนเงินทอน');
@@ -339,12 +358,12 @@ function SaleDetail({ id, onClose, onChanged }: { id: string; onClose: () => voi
         <div><b>วันที่</b>{thDate(sale.doc_date)}</div>
         <div><b>ครบกำหนด</b>{thDate(sale.due_date)} ({sale.credit_days === 0 ? 'เงินสด' : `${sale.credit_days} วัน`})</div>
         <div><b>พนักงานขาย</b>{salespeople.find(s => s.id === sale.salesperson_id)?.name ?? '—'}</div>
-        <div><b>ค่าคอม</b>{money(sale.commission)} ({sale.commission_rate}%)</div>
+        <div><b>ค่าคอมรวม</b>{money(sale.commission)}</div>
         {c?.pay_day && <div><b>วันรับเงินประจำ</b>ทุกวันที่ {c.pay_day}</div>}
       </div>
       <div className="tablewrap">
         <table>
-          <thead><tr><th>รายการ</th><th>หมวด</th><th className="n">จำนวน</th><th className="n">ราคา/หน่วย</th><th className="n">รวม</th></tr></thead>
+          <thead><tr><th>รายการ</th><th>หมวด</th><th className="n">จำนวน</th><th className="n">ราคา/หน่วย</th><th className="n">รวม</th><th className="n">ค่าคอม</th></tr></thead>
           <tbody>
             {items.map(i => (
               <tr key={i.id}>
@@ -353,6 +372,9 @@ function SaleDetail({ id, onClose, onChanged }: { id: string; onClose: () => voi
                 <td className="n">{qty(i.qty)}</td>
                 <td className="n">{qty(i.unit_price)}</td>
                 <td className="n">{money(num(i.qty) * num(i.unit_price))}</td>
+                <td className="n" style={{ width: 120 }}>
+                  {isStaff ? <CommissionInput value={i.commission} onCommit={v => updateCommission(i.id, v)} /> : money(i.commission)}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -498,5 +520,16 @@ export function ReceivablesPage() {
       </Card>
       {open && <SaleDetail id={open} onClose={() => setOpen(null)} onChanged={load} />}
     </div>
+  );
+}
+
+/** Saves when the field loses focus, so typing doesn't write on every keystroke. */
+function CommissionInput({ value, onCommit }: { value: number; onCommit: (v: number) => void }) {
+  const [v, setV] = useState(String(num(value)));
+  useEffect(() => setV(String(num(value))), [value]);
+  return (
+    <input type="number" step="any" inputMode="decimal" style={{ textAlign: 'right' }} value={v}
+      onChange={e => setV(e.target.value)}
+      onBlur={() => num(v) !== num(value) && onCommit(num(v))} />
   );
 }

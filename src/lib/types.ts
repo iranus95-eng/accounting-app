@@ -5,7 +5,11 @@ export interface Settings {
   id: number; company_name: string; vat_rate: number; sso_rate: number; sso_min: number; sso_max: number; petty_limit: number;
 }
 export interface Category { id: string; name: string }
-export interface Product { id: string; code: string | null; name: string; category_id: string; price: number; cost: number | null; active: boolean }
+export interface Product {
+  id: string; code: string | null; name: string; category_id: string; price: number; cost: number | null;
+  /** default commission in baht per unit, prefills the bill line */
+  commission_per_unit: number | null; active: boolean;
+}
 export interface Customer {
   id: string; code: string | null; name: string; tax_id: string | null; branch: string; credit_days: number | null;
   pay_day: number | null; address: string | null; phone: string | null; note: string | null; active: boolean;
@@ -22,7 +26,11 @@ export interface SaleSummary {
   has_vat: boolean; credit_days: number; commission_rate: number; note: string | null;
   subtotal: number; vat: number; total: number; received: number; deducted: number; commission: number;
 }
-export interface SaleItem { id: string; sale_id: string; product_id: string | null; description: string; category_id: string; qty: number; unit_price: number }
+export interface SaleItem {
+  id: string; sale_id: string; product_id: string | null; description: string; category_id: string; qty: number; unit_price: number;
+  /** commission in baht for this line */
+  commission: number;
+}
 export interface Receipt { id: string; sale_id: string; receipt_date: string; amount: number; deduction: number; note: string | null }
 /** Internal customer rebate (เงินทอน): not on the bill, not part of VAT, owner-only. */
 export interface Rebate { id: string; sale_id: string; amount: number; paid_date: string | null; note: string | null }
