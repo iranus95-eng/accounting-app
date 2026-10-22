@@ -5,6 +5,7 @@ import { downloadCsv, money, monthRange, num, r2, shiftMonth, thMonth } from '..
 import type { Expense, Payroll, PettyCash, Purchase, SaleSummary } from '../lib/types';
 import { Card, Empty, Kpi } from '../ui';
 
+interface RebateRow { amount: number; paid_date: string | null; sales: { doc_date: string } }
 interface ItemRow { qty: number; unit_price: number; category_id: string; sales: { doc_date: string; has_vat: boolean } }
 
 export interface MonthData {
@@ -14,6 +15,8 @@ export interface MonthData {
   expenses: Expense[];
   petty: PettyCash[];
   payroll: Payroll[];
+  /** empty unless the viewer is the owner (RLS) */
+  rebates: RebateRow[];
 }
 
 export function useMonthData(month: string) {
@@ -30,12 +33,14 @@ export function useMonthData(month: string) {
       sb.from('expenses').select('*').gte('doc_date', from).lt('doc_date', to),
       sb.from('petty_cash').select('*').gte('doc_date', from).lt('doc_date', to),
       sb.from('payroll').select('*').eq('month', from),
-    ]).then(([s, i, p, e, pc, pr]) => {
+      sb.from('rebates').select('amount,paid_date,sales!inner(doc_date)').gte('sales.doc_date', from).lt('sales.doc_date', to),
+    ]).then(([s, i, p, e, pc, pr, rb]) => {
       if (!live) return;
       try {
         setData({
           sales: must(s) as SaleSummary[], items: must(i) as unknown as ItemRow[], purchases: must(p) as Purchase[],
           expenses: must(e) as Expense[], petty: must(pc) as PettyCash[], payroll: must(pr) as Payroll[],
+          rebates: must(rb) as unknown as RebateRow[],
         });
       } catch (err) { setError((err as Error).message); }
     });
@@ -45,14 +50,17 @@ export function useMonthData(month: string) {
 }
 
 export interface PL {
-  revenue: number; cogs: number; gross: number;
+  /** billed sales before VAT; revenue is after rebates */
+  billed: number; rebates: number; revenue: number; cogs: number; gross: number;
   lines: { label: string; amount: number }[];
   opex: number; net: number;
 }
 
 export function profitAndLoss(d: MonthData): PL {
   const sum = <T,>(xs: T[], f: (x: T) => number) => r2(xs.reduce((s, x) => s + f(x), 0));
-  const revenue = sum(d.sales, s => num(s.subtotal));
+  const billed = sum(d.sales, s => num(s.subtotal));
+  const rebates = sum(d.rebates, r => num(r.amount));
+  const revenue = r2(billed - rebates);
   const cogs = sum(d.purchases, p => num(p.amount));
   const lines: { label: string; amount: number }[] = [];
   const salaries = sum(d.payroll, p => num(p.salary) + num(p.overtime));
@@ -68,7 +76,7 @@ export function profitAndLoss(d: MonthData): PL {
   for (const p of d.petty) if (p.kind === 'out') byCat.set(`${p.category} (เงินสดย่อย)`, (byCat.get(`${p.category} (เงินสดย่อย)`) ?? 0) + num(p.amount));
   for (const [label, amount] of [...byCat].sort((a, b) => b[1] - a[1])) lines.push({ label, amount: r2(amount) });
   const opex = sum(lines, l => l.amount);
-  return { revenue, cogs, gross: r2(revenue - cogs), lines, opex, net: r2(revenue - cogs - opex) };
+  return { billed, rebates, revenue, cogs, gross: r2(revenue - cogs), lines, opex, net: r2(revenue - cogs - opex) };
 }
 
 export function ReportsPage() {
@@ -98,7 +106,9 @@ export function ReportsPage() {
 function PLReport({ data, month }: { data: MonthData; month: string }) {
   const pl = profitAndLoss(data);
   const rows: [string, number | null, string?][] = [
-    ['รายได้จากการขาย (ก่อน VAT)', pl.revenue],
+    ...(pl.rebates
+      ? [['ยอดขายตามบิล (ก่อน VAT)', pl.billed], ['หัก เงินทอนลูกค้า', -pl.rebates], ['ยอดขายสุทธิ', pl.revenue, 'total']] as [string, number, string?][]
+      : [['รายได้จากการขาย (ก่อน VAT)', pl.revenue]] as [string, number][]),
     ['หัก ต้นทุนขาย (ซื้อสินค้าในเดือน)', -pl.cogs],
     ['กำไรขั้นต้น', pl.gross, 'total'],
     ['ค่าใช้จ่ายในการขายและบริหาร', null, 'group'],
@@ -254,7 +264,8 @@ export function DashboardPage() {
   return (
     <div className="stack">
       <div className="kpis">
-        <Kpi label="ยอดขาย (ก่อน VAT)" value={money(pl.revenue)} foot={`${data.sales.length} บิล`} />
+        <Kpi label={pl.rebates ? 'ยอดขายสุทธิ (หักเงินทอน)' : 'ยอดขาย (ก่อน VAT)'} value={money(pl.revenue)}
+          foot={pl.rebates ? `ตามบิล ${money(pl.billed)} · เงินทอน ${money(pl.rebates)}` : `${data.sales.length} บิล`} />
         <Kpi label="กำไรขั้นต้น" value={money(pl.gross)} foot={pl.revenue ? `${((pl.gross / pl.revenue) * 100).toFixed(1)}% ของยอดขาย` : undefined} />
         <Kpi label="กำไรสุทธิ" value={money(pl.net)} tone={pl.net < 0 ? 'neg' : 'pos'} />
         <Kpi label="ลูกหนี้คงค้างทั้งหมด" value={ar ? money(ar.owed) : '…'} foot={ar && ar.overdue > 0 ? <span className="neg">เกินกำหนด {money(ar.overdue)}</span> : undefined} />

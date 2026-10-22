@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useApp, byId } from '../app-context';
 import { sb, must } from '../lib/supabase';
 import { downloadCsv, money, monthRange, num, qty, r2, thDate, thMonth, today } from '../lib/format';
-import { CREDIT_OPTIONS, type Receipt, type SaleItem, type SaleSummary } from '../lib/types';
+import { CREDIT_OPTIONS, type Rebate, type Receipt, type SaleItem, type SaleSummary } from '../lib/types';
 import { Card, DangerButton, DueBadge, Empty, Field, Kpi, Modal } from '../ui';
 
 const balanceOf = (s: SaleSummary) => r2(num(s.total) - num(s.received) - num(s.deducted));
@@ -102,6 +102,7 @@ function NewSale({ onClose, onSaved }: { onClose: () => void; onSaved: (id: stri
   const [hasVat, setHasVat] = useState(true);
   const [credit, setCredit] = useState<string>('');
   const [note, setNote] = useState('');
+  const [rebate, setRebate] = useState('');
   const [lines, setLines] = useState<Line[]>([blankLine()]);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -154,6 +155,7 @@ function NewSale({ onClose, onSaved }: { onClose: () => void; onSaved: (id: stri
         sale_id: sale!.id, product_id: l.product_id || null, description: l.description.trim(), category_id: l.category_id,
         qty: num(l.qty), unit_price: num(l.unit_price),
       }))));
+      if (num(rebate) > 0) must(await sb.from('rebates').insert({ sale_id: sale.id, amount: r2(num(rebate)) }));
       toast('บันทึกบิลแล้ว');
       onSaved(sale.id);
     } catch (e) {
@@ -232,7 +234,17 @@ function NewSale({ onClose, onSaved }: { onClose: () => void; onSaved: (id: stri
         <span className="t">รวมทั้งสิ้น</span><span className="t">{money(subtotal + vat)}</span>
         {rate > 0 && <><span className="muted">ค่าคอม {rate}%</span><span className="muted">{money((subtotal * rate) / 100)}</span></>}
       </div>
-      <Field label="หมายเหตุ" full><textarea rows={2} value={note} onChange={e => setNote(e.target.value)} /></Field>
+      <div className="grid">
+        <Field label="หมายเหตุ" full><textarea rows={2} value={note} onChange={e => setNote(e.target.value)} /></Field>
+        {member.role === 'owner' && (
+          <Field label="เงินทอนลูกค้า (บันทึกภายใน ไม่แสดงในบิล)">
+            <input type="number" step="any" inputMode="decimal" value={rebate} onChange={e => setRebate(e.target.value)} />
+          </Field>
+        )}
+      </div>
+      {member.role === 'owner' && num(rebate) > 0 && (
+        <p className="note">ได้จริง {money(subtotal - num(rebate))} ก่อน VAT ({subtotal ? (((subtotal - num(rebate)) / subtotal) * 100).toFixed(1) : 0}% ของบิล)</p>
+      )}
       {err && <div className="err">{err}</div>}
       <div className="actions">
         <button className="btn" onClick={onClose}>ยกเลิก</button>
@@ -243,7 +255,10 @@ function NewSale({ onClose, onSaved }: { onClose: () => void; onSaved: (id: stri
 }
 
 function SaleDetail({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
-  const { customers, salespeople, categories, isStaff, toast } = useApp();
+  const { customers, salespeople, categories, isStaff, member, toast } = useApp();
+  const isOwner = member.role === 'owner';
+  const [rebates, setRebates] = useState<Rebate[]>([]);
+  const [rb, setRb] = useState({ amount: '', paid_date: '', note: '' });
   const [sale, setSale] = useState<SaleSummary | null>(null);
   const [items, setItems] = useState<SaleItem[]>([]);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
@@ -251,11 +266,13 @@ function SaleDetail({ id, onClose, onChanged }: { id: string; onClose: () => voi
   const [err, setErr] = useState('');
 
   const load = useCallback(async () => {
-    const [s, i, r] = await Promise.all([
+    const [s, i, r, rbs] = await Promise.all([
       sb.from('sale_summary').select('*').eq('id', id).single(),
       sb.from('sale_items').select('*').eq('sale_id', id),
       sb.from('receipts').select('*').eq('sale_id', id).order('receipt_date'),
+      sb.from('rebates').select('*').eq('sale_id', id).order('created_at'),
     ]);
+    setRebates((rbs.data ?? []) as Rebate[]);
     setSale(s.data as SaleSummary);
     setItems((i.data ?? []) as SaleItem[]);
     setReceipts((r.data ?? []) as Receipt[]);
@@ -283,6 +300,27 @@ function SaleDetail({ id, onClose, onChanged }: { id: string; onClose: () => voi
     if (res.error) return toast(res.error.message);
     await load();
     onChanged();
+  }
+
+  async function addRebate() {
+    setErr('');
+    if (num(rb.amount) <= 0) return setErr('กรุณากรอกจำนวนเงินทอน');
+    const res = await sb.from('rebates').insert({ sale_id: id, amount: r2(num(rb.amount)), paid_date: rb.paid_date || null, note: rb.note.trim() || null });
+    if (res.error) return setErr(res.error.message);
+    setRb({ amount: '', paid_date: '', note: '' });
+    await load();
+  }
+
+  async function setRebatePaid(rid: string, paid_date: string | null) {
+    const res = await sb.from('rebates').update({ paid_date }).eq('id', rid);
+    if (res.error) return toast(res.error.message);
+    await load();
+  }
+
+  async function removeRebate(rid: string) {
+    const res = await sb.from('rebates').delete().eq('id', rid);
+    if (res.error) return toast(res.error.message);
+    await load();
   }
 
   async function removeSale() {
@@ -356,6 +394,37 @@ function SaleDetail({ id, onClose, onChanged }: { id: string; onClose: () => voi
           </Field>
           <Field label="หมายเหตุ"><input value={rc.note} onChange={e => setRc({ ...rc, note: e.target.value })} /></Field>
         </div>
+      )}
+      {isOwner && (
+        <>
+          <h3 style={{ marginTop: 20 }}>เงินทอนลูกค้า <span className="muted" style={{ fontSize: 13, fontWeight: 400 }}>บันทึกภายใน ไม่แสดงในบิลและรายงานภาษี</span></h3>
+          {rebates.length > 0 && (
+            <table>
+              <tbody>
+                {rebates.map(r => (
+                  <tr key={r.id}>
+                    <td className="n">{money(r.amount)}</td>
+                    <td>{r.paid_date ? <span className="pill ok">คืนแล้ว {thDate(r.paid_date)}</span> : <span className="pill warn">ยังไม่คืน</span>}</td>
+                    <td className="muted">{r.note}</td>
+                    <td className="n">
+                      <span className="toolbar" style={{ justifyContent: 'flex-end' }}>
+                        {!r.paid_date && <button className="btn sm" onClick={() => setRebatePaid(r.id, today())}>คืนแล้ววันนี้</button>}
+                        <DangerButton onConfirm={() => removeRebate(r.id)} />
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <p className="note">ได้จริง {money(num(sale.subtotal) - rebates.reduce((s, r) => s + num(r.amount), 0))} ก่อน VAT</p>
+          <div className="grid" style={{ marginTop: 8 }}>
+            <Field label="จำนวนเงินทอน"><input type="number" step="any" inputMode="decimal" value={rb.amount} onChange={e => setRb({ ...rb, amount: e.target.value })} /></Field>
+            <Field label="วันที่คืน (ว่าง = ยังไม่คืน)"><input type="date" value={rb.paid_date} onChange={e => setRb({ ...rb, paid_date: e.target.value })} /></Field>
+            <Field label="หมายเหตุ"><input value={rb.note} onChange={e => setRb({ ...rb, note: e.target.value })} /></Field>
+          </div>
+          <div className="actions" style={{ marginTop: 8 }}><button className="btn" onClick={addRebate}>+ บันทึกเงินทอน</button></div>
+        </>
       )}
       {err && <div className="err">{err}</div>}
       <div className="actions">
