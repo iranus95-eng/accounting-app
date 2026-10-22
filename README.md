@@ -1,3 +1,41 @@
 # Wonder Accounting
 
-ระบบบัญชีออนไลน์ บริษัท วันเดอร์พริ้น จำกัด
+ระบบบัญชีออนไลน์สำหรับ บริษัท วันเดอร์พริ้น จำกัด (ธุรกิจซื้อขาย ไม่มีสต๊อก)
+
+**ทำอะไรได้**
+- บิลขาย มี VAT / ไม่มี VAT, เครดิต 0/30/45/60 วัน เลือกต่อบิล, เลขที่บิลรันอัตโนมัติรายเดือน (IVปปดด-nnn)
+- ลูกหนี้และการรับเงิน (รวมส่วนที่ลูกค้าหัก), แยกอายุหนี้
+- ซื้อสินค้า (ลงเป็นต้นทุนในเดือนที่ซื้อ), ค่าใช้จ่าย, เงินสดย่อย
+- เงินเดือน ค่าล่วงเวลา หักเบิกล่วงหน้า ประกันสังคม 5% (ฐาน 1,650–17,500)
+- ค่าคอมมิชชั่น (ไม่หัก ณ ที่จ่าย) คิดจากยอดก่อน VAT ต่อบิล
+- รายงาน: กำไรขาดทุนรายเดือน, ยอดขายตามหมวดสินค้า, ภาษีซื้อ-ขาย, ค่าคอม, ประวัติลูกค้า, ประวัติพนักงานขาย
+- ส่งออก Excel (CSV) ทุกหน้า ให้ผู้ทำบัญชี
+- ผู้ใช้หลายคน 3 สิทธิ์: เจ้าของ / ผู้ทำบัญชี / พนักงานขาย (เห็นเฉพาะบิลของตัวเอง)
+
+## โครงสร้าง
+
+- Frontend: Vite + React + TypeScript (`src/`)
+- ฐานข้อมูล: Supabase schema `acct` (แยกจากตารางของแอปอื่นในโปรเจกต์เดียวกัน) พร้อม row level security
+- SQL ทั้งหมดอยู่ใน `supabase/migrations/` (ถูก apply ในโปรเจกต์แล้ว)
+
+## ตั้งค่าครั้งแรก
+
+1. Supabase → Project Settings → Data API → Exposed schemas: เพิ่ม `acct`
+2. Supabase → Authentication → URL Configuration: ใส่ URL ของเว็บ (เช่น `https://iranus95-eng.github.io/accounting-app/`) เป็น Site URL / Redirect URL
+3. GitHub → Settings → Pages → Source: GitHub Actions (เว็บจะ deploy อัตโนมัติเมื่อ merge เข้า `main`)
+4. สมัครผู้ใช้คนแรกที่หน้าเว็บ แล้วตั้งเป็นเจ้าของ:
+   ```sql
+   insert into acct.members (user_id, display_name, role)
+   select id, 'ชื่อที่แสดง', 'owner' from auth.users where email = 'อีเมลของเจ้าของ';
+   ```
+   หลังจากนั้นเจ้าของเพิ่มผู้ใช้อื่นได้เองที่หน้า “ตั้งค่า / ผู้ใช้”
+
+## พัฒนา
+
+```bash
+npm install
+npm run dev      # http://localhost:5173
+npm run build
+```
+
+ค่า Supabase URL และ publishable key อยู่ใน `src/lib/supabase.ts` (เปิดเผยได้ สิทธิ์ถูกคุมด้วย RLS) เปลี่ยนได้ด้วย `.env.local` ตาม `.env.example`
